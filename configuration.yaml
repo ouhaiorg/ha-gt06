@@ -1,0 +1,7 @@
+mqtt:
+  device_tracker:
+    - name: "gt06"
+      state_topic: "868120236829443/state" #change to your device ID
+      payload_home: "home"
+      payload_not_home: "not_home"
+      json_attributes_topic: "828120236829443/attributes" #change to your device ID
