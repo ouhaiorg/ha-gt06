@@ -1,4 +1,4 @@
-A python service daemon of gt06, translate the gt06 protocol to mqtt, tested for TUQIANG gt550 car obd gps locator and homeassistant 2023.4.4.
+gt06 daemon can translate the gt06 protocol to MQTT protocol, use for a device tracker in homeassistant, have tested by TUQIANG gt550 car obd gps locator and homeassistant 2023.4.4.
 
 How to use:
    1. modify config.ini;
