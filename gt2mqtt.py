@@ -8,10 +8,11 @@ a = 6378245.0
 ee = 0.00669342162296594323
 x_pi = 3.14159265358979324 * 3000.0 / 180.0;
 
-fname = sys.argv[0].split('/')[-1].split('.')[0]
+f_dir = os.path.abspath((os.path.dirname(__file__)))
+f_name = sys.argv[0].split('/')[-1].split('.')[0]
 
 rfh = logging.handlers.RotatingFileHandler(
-    filename = '/var/log/' + fname + '.log',
+    filename = '/var/log/' + f_name + '.log',
     mode = 'a',
     maxBytes = 10 * 1024 * 1024,
     backupCount = 2,
@@ -82,13 +83,15 @@ class pipethread2(threading.Thread):
            #     self.pipe.Flag = False
            #      self.pipe.mqtt.send(self.pipe.deviceID + '/state', 'offline')
             if (time2 > 185 and time2 < 545):
-                if self.pipe.senddata["ACC"]:
+                if self.pipe.data["ACC"]:
                    self.pipe.set_accoff()
-                   log("timeout true:" + str(time2) + "s,accOff")
                    log("timeout:" + str(time2) + "s, call accOff_function")
                    self.pipe.accOff_func()
-                   log("send data:%s" %json.dumps(self.pipe.senddata))
-                   self.pipe.mqtt.send(self.pipe.deviceID + '/attributes', json.dumps(self.pipe.senddata))
+                   self.pipe.mqtt.send(self.pipe.deviceID + '/attributes', json.dumps(self.pipe.data))
+            elif (time2 > 900):
+                   log("timeout >900s;close threading")
+                   self.pipe.close()
+                   self.close()
 
 class pipethread(threading.Thread):
     '''
@@ -105,14 +108,13 @@ class pipethread(threading.Thread):
         self.mqtt = mqtt
         self.Flag = True
         self.time = int(time.time())
-        self.senddata = {"ACC": 0,"POWER": 0,"GPS": 0,"DEFENSE": 0,"powerLevel": 0,"gsmSignal": 0,"gpsRealtime": 0,"gpsPosition": 0,"latitude": 27.973684,"longitude": 120.709219,"speed": 0,"course": 0,"time": "2021-04-06 08:12:36","position": "home", "distance": 0,"duration": 0,"home":"home"}
+        self.data = {"ACC": 0,"POWER": 0,"GPS": 0,"DEFENSE": 0,"powerLevel": 0,"gsmSignal": 0,"gpsRealtime": 0,"gpsPosition": 0,"latitude": 27.973684,"longitude": 120.709219,"speed": 0,"course": 0,"time": "2023-04-23 08:12:36","position": "香缇车库", "distance": 0,"duration": 0,"home":"home"}
 
         self.pos_home = pos_home
         self.radius_home = 100/111000
         self.deviceID = "noname"
-        self.home = 'home'
-        self.amap_key = ""  #from lbs.amap.com get web service key
-        self.baidu_key = ""  #from lbsyun.baidu.com get AK
+        self.amap_key = "****"  #from lbs.amap.com get web service key
+        self.baidu_key = "****"  #from lbsyun.baidu.com get AK
         (self.shost,self.sport) = self.source.getpeername()
         log("New Pipe create:(%s:%d)" % (self.shost,self.sport))
           
@@ -176,18 +178,19 @@ class pipethread(threading.Thread):
                    rgtp[6:8] = crc16(rgtp[2:6]).to_bytes(length=2,byteorder='big')
                    log("[gt06>%s]%s" %(self.shost,rgtp.hex()))
                    self.source.send(rgtp)
+                   self.update_data(self.deviceID)
                 elif ptype == 0x13:
-                   self.senddata["powerLevel"] = gtp[2]
-                   self.senddata["gsmSignal"] = gtp[3]
-                   self.senddata["GPS"] = 1 if gtp[1]&0x40 else 0
-                   self.senddata["POWER"] = 1 if gtp[1]&0x04 else 0
-                   if (gtp[1]&0x02 == 0) and self.senddata["ACC"] : 
+                   self.data["powerLevel"] = gtp[2]
+                   self.data["gsmSignal"] = gtp[3]
+                   self.data["GPS"] = 1 if gtp[1]&0x40 else 0
+                   self.data["POWER"] = 1 if gtp[1]&0x04 else 0
+                   if (gtp[1]&0x02 == 0) and self.data["ACC"] : 
                       log("acc turn off, call accOff_function")
                       self.accOff_func()
-                   self.senddata["ACC"] = 1 if gtp[1]&0x02 else 0
-                   self.senddata["DEFENSE"] = 1 if gtp[1]&0x01 else 0
+                   self.data["ACC"] = 1 if gtp[1]&0x02 else 0
+                   self.data["DEFENSE"] = 1 if gtp[1]&0x01 else 0
                    self.time = int(time.time())
-                   self.mqtt.send(self.deviceID + '/attributes', json.dumps(self.senddata))
+                   self.mqtt.send(self.deviceID + '/attributes', json.dumps(self.data))
                    rgtp = bytearray.fromhex("78780513000f008F0D0A")     
                    rgtp[4:6] = serial_gtp
                    rgtp[6:8] = crc16(rgtp[2:6]).to_bytes(length=2,byteorder='big')
@@ -195,14 +198,14 @@ class pipethread(threading.Thread):
                    self.source.send(rgtp)
                 elif ptype == 0x22:
                    latitude = (gtp[8]*256*256*256 + gtp[9]*256*256 +gtp[10]*256 + gtp[11]) / 1800000.0
-                   longitude = (gtp[12]*256*256*256 + gtp[13]*256*256 +gtp[14]*256 + gtp[15]) / 1800000.0
-                   self.senddata["speed"] = gtp[16]
-                   self.senddata["course"] = (gtp[17]&0x03)*256 + gtp[18]
+                   longitude = (gtp[12]*256*256*256 + gtp[13]*256*256 +gtp[14]*256 + gtp[15]) / 1800000.0#
+                   self.data["speed"] = gtp[16]
+                   self.data["course"] = (gtp[17]&0x03)*256 + gtp[18]
                    cst_time = datetime.datetime(2000+gtp[1],gtp[2],gtp[3],gtp[4],gtp[5],gtp[6]) + datetime.timedelta(hours=8) 
-                   self.senddata["time"] = cst_time.strftime("%Y-%m-%d %H:%M:%S")
+                   self.data["time"] = cst_time.strftime("%Y-%m-%d %H:%M:%S")
                    
-                   self.senddata["gpsRealtime"] = 0 if gtp[17]&0x20 else 1
-                   self.senddata["gpsPosition"] = 1 if gtp[17]&0x10 else 0
+                   self.data["gpsRealtime"] = 0 if gtp[17]&0x20 else 1
+                   self.data["gpsPosition"] = 1 if gtp[17]&0x10 else 0
                    EastLongitude = False if gtp[17]&0x08 else True
                    NorthLatitude = True if gtp[17]&0x04 else False
                    if EastLongitude and NorthLatitude :
@@ -210,18 +213,18 @@ class pipethread(threading.Thread):
                    else:
                        latitude = latitude if NorthLatitude else -latitude
                        longitude = longitude if EastLongitude else -longitude
-                   self.senddata["latitude"] = round(latitude, 6)
-                   self.senddata["longitude"] = round(longitude, 6)                       
+                   self.data["latitude"] = round(latitude, 6)
+                   self.data["longitude"] = round(longitude, 6)                       
                    if abs(latitude - self.pos_home['latitude']) < self.radius_home and abs(longitude - self.pos_home['longitude']) <  self.radius_home:
                       location_home = 'home' 
                    else:
                       location_home = 'not_home'
-                   if  location_home != self.senddata["home"] :
+                   if  location_home != self.data["home"] :
                       self.mqtt.send(self.deviceID + '/state', location_home)
-                      self.senddata["home"] = location_home
+                      self.data["home"] = location_home
                       log("home change to %s " %location_home)
                    self.time = int(time.time())
-                   self.mqtt.send(self.deviceID + '/attributes', json.dumps(self.senddata))                 
+                   self.mqtt.send(self.deviceID + '/attributes', json.dumps(self.data))                 
                    rgtp = bytearray.fromhex("7878052201a6fdee0d0a")
                    rgtp[4:6] = serial_gtp
                    rgtp[6:8] = crc16(rgtp[2:6]).to_bytes(length=2,byteorder='big')
@@ -265,15 +268,51 @@ class pipethread(threading.Thread):
                 log("redirect error:"+str(ex))
 
     def set_pos(self,str,dist,dura):
-      self.senddata['position'] = str
-      self.senddata['distance'] = dist 
-      self.senddata['duration'] = dura 
+      self.data['position'] = str
+      self.data['distance'] = dist 
+      self.data['duration'] = dura 
  
+    def update_data(self, deviceID):
+        data_file = f_dir + "/" + f_name + ".ini"
+        if not os.path.isfile(data_file):
+           log("Error: %s does not exist!" % data_file)
+           return
+        cf=configparser.ConfigParser("")
+        cf.read(data_file)
+        self.data["latitude"]=cf.getfloat(deviceID,"latitude")
+        if cf.has_section(deviceID):
+          self.data["longitude"]=cf.getfloat(deviceID,"longitude")
+          self.data["time"]=cf.get(deviceID,"time")
+          self.data["position"]=cf.get(deviceID,"position")
+          self.data["distance"]=cf.getint(deviceID,"distance")
+          self.data["duration"]=cf.getint(deviceID,"duration")
+          self.data["home"]=cf.get(deviceID,"home")
+    
+    def save_data(self):
+        data_file = f_dir + "/" + f_name + ".ini"
+        cf=configparser.ConfigParser("")
+        try:
+           cf.read(data_file)
+           if not cf.has_section(self.deviceID):
+              cf.add_section(self.deviceID)
+           cf.set(self.deviceID,"latitude",str(self.data["latitude"]))
+           cf.set(self.deviceID,"longitude",str(self.data["longitude"]))
+           cf.set(self.deviceID,"position",self.data["position"])
+           cf.set(self.deviceID,"distance",str(self.data["distance"]))
+           cf.set(self.deviceID,"duration",str(self.data["duration"]))
+           cf.set(self.deviceID,"time",self.data["time"])
+           cf.set(self.deviceID,"home",self.data["home"])
+           cf.write(open(data_file,'w'))
+           log("save data to file:%s" %data_file)
+        except Exception as e:
+           log("save data to %s error:" %(data_file,e.args))
+           return None
+
     def set_accoff(self):
-       self.senddata["ACC"] = 0
-       self.senddata["speed"] = 0
-       self.senddata["gsmSignal"] = 0
-       self.senddata["gsmSignal"] = 0
+       self.data["ACC"] = 0
+       self.data["speed"] = 0
+       self.data["gsmSignal"] = 0
+       self.data["gsmSignal"] = 0
 
     def accOff_func(self):
       if self.baidu_key =="" or self.amap_key == "":
@@ -281,22 +320,22 @@ class pipethread(threading.Thread):
       cur_pos = "unknown"
       dist = 0
       dura = 0
-      longitude_str = str(self.senddata['longitude'])
-      latitude_str = str(self.senddata['latitude'])
+      longitude_str = str(self.data['longitude'])
+      latitude_str = str(self.data['latitude'])
       url = "https://restapi.amap.com/v3/geocode/regeo?output=json&location="+longitude_str+","+latitude_str+"&key="+self.amap_key+"&radius=1000&extensions=all"
       res = requests.get(url)
       if res.status_code == 200:
          cur_pos = res.json()["regeocode"]["formatted_address"]
       log("Get current postion:%s" %cur_pos)
-      url = "http://api.map.baidu.com/routematrix/v2/driving?output=json&origins=" + latitude_str + "," + longitude_str + "&destinations=" + str(self.pos_home['latitude']) + "," + str(self.pos_home['longitude']) + "&coord_type=gcj02&tactics=12&ak="+self.baidu_key
-      res = requests.get(url)
-      log("response = %s" %res)
-      log("response = %s" %res.json())
-      if res.status_code == 200:
-         dist = res.json()["result"][0]["distance"]["value"]
-         dura = res.json()["result"][0]["duration"]["value"]
-      log("Get current distance:%d;duration:%d" %(dist,dura))
+      if self.data['home'] != 'home':
+         url = "http://api.map.baidu.com/routematrix/v2/driving?output=json&origins=" + latitude_str + "," + longitude_str + "&destinations=" + str(self.pos_home['latitude']) + "," + str(self.pos_home['longitude']) + "&coord_type=gcj02&tactics=12&ak="+self.baidu_key
+         res = requests.get(url)
+         if res.status_code == 200:
+            dist = res.json()["result"][0]["distance"]["value"]
+            dura = res.json()["result"][0]["duration"]["value"]
+         log("Get current distance:%d;duration:%d" %(dist,dura))
       self.set_pos(cur_pos, dist, dura)
+      self.save_data()
 
 class mqtt2(threading.Thread):
     def __init__(self,host,port,sock,muser,mpassword):
