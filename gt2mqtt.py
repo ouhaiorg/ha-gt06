@@ -70,12 +70,19 @@ class pipethread2(threading.Thread):
     def __init__(self,pipe1):
         threading.Thread.__init__(self)
         self.pipe = pipe1
+        self._stop_event = threading.Event()
     
     def stop(self):
         log("Threading Stop")
+    
+    def close(self):
+       return self._stop_event.set()
+
+    def stopped(self):
+       return self._stop_event.is_set()
 
     def run(self):
-        while self.pipe.Flag:
+        while not self.stopped():
             time.sleep(90)
             time2 = int(time.time()) - self.pipe.time
             log("Threading HeartBeat......" + str(time2) + "s")
@@ -91,7 +98,11 @@ class pipethread2(threading.Thread):
             elif (time2 > 900):
                    log("timeout >900s;close threading")
                    self.pipe.close()
+                   self.pipe.mqtt.client.disconnect()
+                   self.pipe.source.shutdown(socket.SHUT_RDWR)
+                   self.pipe.source.close()
                    self.close()
+                  
 
 class pipethread(threading.Thread):
     '''
@@ -113,18 +124,24 @@ class pipethread(threading.Thread):
         self.pos_home = pos_home
         self.radius_home = 100/111000
         self.deviceID = "noname"
-        self.amap_key = "****"  #from lbs.amap.com get web service key
-        self.baidu_key = "****"  #from lbsyun.baidu.com get AK
+        self.amap_key = ""  #from lbs.amap.com get web service key
+        self.baidu_key = ""  #from lbsyun.baidu.com get AK
         (self.shost,self.sport) = self.source.getpeername()
+        self._stop_event = threading.Event()
         log("New Pipe create:(%s:%d)" % (self.shost,self.sport))
           
-   
+    def close(self):
+       return self._stop_event.set()
+
+    def stopped(self):
+       return self._stop_event.is_set()
+
     def run(self):
 
         last_data = b''
         p2=pipethread2(self)
         p2.start()
-        while self.Flag:
+        while not self.stopped():
             try:
                 data=self.source.recv(1024)
                 if not data: break
